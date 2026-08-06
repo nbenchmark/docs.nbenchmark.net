@@ -1,0 +1,245 @@
+---
+title: FAQ
+description: Frequently asked questions about NBenchmark.
+order: 10
+---
+
+# FAQ
+
+## General
+
+### How is NBenchmark different from BenchmarkDotNet?
+
+NBenchmark brings serious statistical rigor - non-parametric significance testing, confidence intervals, and percentile analysis - directly into your daily development cycle with zero configuration and zero external dependencies. Its numerical core is dependency-free and cross-validated against SciPy and NumPy to machine precision (see [Validation & Accuracy](./statistics/validation.md)).
+
+NBenchmark takes a different trade-off from tools like BenchmarkDotNet: **no out-of-process compilation, no XML configuration, minimal dependencies, and three lines of code to get started**.
+
+The two tools are complementary - NBenchmark for day-to-day development feedback, BenchmarkDotNet for publishable cross-platform results. See also the [Troubleshooting guide](./troubleshooting.md) for help with common measurement issues.
+
+### Does NBenchmark require any special project type or configuration?
+
+No. Add the NuGet package reference and start calling `Benchmark.Run`. No project template, no attribute on the project, no XML configuration.
+
+### What .NET versions are supported?
+
+NBenchmark targets **net8.0**, **net9.0**, and **net10.0**. You need the .NET 8 SDK or later.
+
+---
+
+## Measurement
+
+### Why does my benchmark show a large Error value?
+
+A large Error (margin of error) means the measurements are highly variable. Common causes:
+
+- **Too few iterations.** Try `WithIterations(500)` or higher.
+- **OS scheduling noise.** Switch to `.WithOutlierMode(OutlierMode.IqrFence)` to discard extreme measurements from context switches or scheduler interrupts.
+- **Thermal throttling.** On laptops, the CPU may reduce clock speed mid-run. Increase warmup with `.WithWarmup(50)` to let the CPU stabilise before measurement, or reduce iterations to shorten the run.
+- **The code path varies.** If your benchmark hits different code paths each iteration (e.g. a cache that fills up), that variability is real and expected.
+
+See the [Troubleshooting guide](./troubleshooting.md) for the full symptom-to-fix index and configuration remedies.
+
+### Why should I care about the median vs. the mean?
+
+If a few iterations are very slow (e.g. a GC pause), the mean is pulled upward but the median is not. For most comparisons, the **median** better represents the steady-state performance of your code. The **mean** is most useful when read alongside the confidence interval.
+
+### My benchmark produces `0 ns`. What's happening?
+
+The compiler or JIT has likely optimised the benchmark body away because it has no observable side effects. Make sure your benchmark either:
+
+- Returns a value (use `Benchmark.Run(() => Compute())` which uses the generic overload that consumes the result), or
+- Has a side effect (writes to a field, uses a passed-in output parameter, etc.)
+
+Use `--dry-run` to verify the body is being invoked. See the [Troubleshooting guide](./troubleshooting.md) for more on dead code elimination and other zero-result causes.
+
+### How does allocation tracking work? Does it include framework overhead?
+
+NBenchmark samples `GC.GetAllocatedBytesForCurrentThread` immediately before and after the action. If an async benchmark resumes on a different thread, it falls back to a `GC.GetTotalAllocatedBytes` delta for that iteration.
+
+Any allocations by the benchmark framework itself (setup/teardown delegates, etc.) that fall between the two reads would be included, but in practice this is usually negligible for simple benchmarks.
+
+### Can I benchmark async code?
+
+Yes. Use `Benchmark.RunAsync`, the `Func<Task>` overload of `BenchmarkSuite.Add`, or a `Task`-returning `[Benchmark]` method. The timer captures the full async duration including all awaited work.
+
+### What happens when a benchmark throws an exception?
+
+The exception is captured and the benchmark is reported as an **errored result** (`Errored = true`, with the message in `ErrorMessage`); the rest of the run continues. This includes `OperationCanceledException` thrown by the benchmark body itself (e.g. an `HttpClient` timeout) - a misbehaving benchmark never aborts the whole run.
+
+The only exception that propagates is a cancellation triggered through the `CancellationToken` you passed to `RunAsync` - that means *you* asked the run to stop. Suite teardown still runs in that case.
+
+---
+
+## Statistics
+
+### What does the Sig column mean?
+
+It shows the result of a **[Mann-Whitney U test](https://en.wikipedia.org/wiki/Mann%E2%80%93Whitney_U_test)** comparing the benchmark to the baseline. A **✓** means the difference is statistically significant (p < 0.05) - unlikely to be random noise. A **✗** means it is not significant.
+
+When you compare **three or more** benchmarks, NBenchmark first runs a **[Kruskal-Wallis](https://en.wikipedia.org/wiki/Kruskal%E2%80%93Wallis_test) omnibus** test. If the omnibus is significant (at least one group differs), post-hoc pairwise Mann-Whitney U tests run with Holm-Bonferroni correction, and the per-row Sig column is populated with the corrected verdicts. If the omnibus is not significant, the Sig column stays blank.
+
+See [Statistical Significance](./getting-started/key-concepts.md#statistical-significance) and the [Statistics Deep Dive](./statistics/) for full details.
+
+### Why is significance sometimes blank?
+
+Significance requires at least **2 samples in each group**. With fewer samples the test cannot produce a reliable result.
+
+It is also absent on the baseline itself and when `EnableSignificance` is set to `false`.
+
+### The result is significant but the difference is tiny. Should I care?
+
+Statistical significance does not imply practical importance. With many iterations, even a 0.1 ns difference can be statistically significant. Always combine the Sig column with the **Ratio** column to judge whether the difference is meaningful for your use case.
+
+### What confidence level should I use?
+
+The default **95%** is the standard choice for most purposes. Use **99%** when you need to be more conservative - for example, when asserting a performance budget in CI.
+
+A higher confidence level produces a **wider** (larger) Error value.
+
+### The Error column is showing `±0 ns`. Is that correct?
+
+`MarginOfError` is zero when `n < 2` (only one sample was collected) or when the measured standard deviation is exactly zero (all iterations took the same time). The latter can happen when the timer resolution is coarser than the benchmark duration - if everything rounds to the same tick count, there is no measured spread.
+
+---
+
+## Reporters and output
+
+### Can I use the Markdown or CSV reporter from a BenchmarkSuite?
+
+Yes - all four modes support any reporter:
+
+```csharp
+await new BenchmarkSuite("name")
+    .WithReporter(new MarkdownReporter("results/"))
+    .WithReporter(new CsvReporter("results/"))
+    .RunAsync();
+```
+
+### Can I specify a custom filename?
+
+Yes. All file reporters accept an optional `fileName` parameter:
+
+```csharp
+new JsonReporter("results/", "benchmarks.json")
+new MarkdownReporter("results/", "BENCHMARKS.md")
+new CsvReporter("results/", "results.csv")
+```
+
+When `fileName` is omitted, the reporter auto-generates a timestamped filename with a per-process counter (e.g. `benchmark-results-20260606-034000-001.md`). When specified, the exact filename is used and subsequent runs overwrite the same file.
+
+### Can I write my own reporter?
+
+Yes. Implement `IReporter` from the `NBenchmark` package:
+
+```csharp
+public sealed class MyReporter : IReporter
+{
+    public string Name => "my-reporter";
+
+    public Task ReportAsync(IReadOnlyList<BenchmarkResult> results, CancellationToken cancellationToken = default)
+    {
+        foreach (var r in results.Where(r => !r.Errored))
+            System.Console.WriteLine($"{r.Name}: {r.Median:F0} ns");
+        return Task.CompletedTask;
+    }
+}
+```
+
+To make it available from the `--reporter` CLI flag, register it with the global `ReporterRegistry`:
+
+```csharp
+ReporterRegistry.Register("my-reporter", "Custom console output", _ => new MyReporter());
+```
+
+The registration can happen in a `[ModuleInitializer]` in your package or at app startup before `BenchmarkHarness.Create(args)` is called.
+
+### What is an auto-attached reporter?
+
+Auto-attached reporters fire on **every** run after the user's explicit reporters, with no opt-in required. They are registered via `ReporterRegistry.RegisterAutoAttach` (distinct from `Register`, which only makes a reporter *available* via `--reporter`). They are designed for side-effect reporters that integrate with an external system - for example, a reporter that writes run results to a file inbox for a separate Studio process to ingest. See the [Custom Reporters](output/custom-reporters.md#auto-attached-reporters) page for the full contract, including the `CI=true` opt-out convention and dedup with explicit reporters.
+
+---
+
+## BenchmarkHarness (Harness mode)
+
+### Can I run benchmarks in source order instead of random order?
+
+Yes:
+
+```bash
+dotnet run -- --order declaration
+```
+
+Or in code: `.WithRunOrder(RunOrder.Declaration)`.
+
+### How do I make the run order reproducible?
+
+Use `--seed`:
+
+```bash
+dotnet run -- --seed 42
+```
+
+### My `[Benchmark]` methods are not being discovered. Why?
+
+Common causes:
+
+1. The method is `static` (only instance methods are measured).
+2. The class is abstract.
+3. The assembly containing the class was not passed to `AddFromAssembly`.
+4. The `[Benchmark]` attribute is from a different namespace (make sure you're using `NBenchmark.Attributes`).
+
+Use `--list` to check what NBenchmark finds before running.
+
+### The host throws "Could not instantiate MyClass". How do I fix it?
+
+`BenchmarkHarness` creates benchmark class instances using `Activator.CreateInstance`, which requires a **public parameterless constructor**. There are three ways to satisfy this:
+
+1. **Add a parameterless constructor** that initialises dependencies itself (simplest, but couples the benchmark class to the dependency).
+2. **Use `[BenchmarkSetup]`** to populate fields on a parameterless-constructed instance.
+3. **Use the `NBenchmark.DependencyInjection` companion package** to resolve the class from an `IServiceProvider`:
+
+   ```csharp
+    await BenchmarkHarness.Create(args)
+        .UseDependencyInjection<MyBenchmarks>(services)
+        .RunAsync();
+   ```
+
+   This is the cleanest approach when you already have a DI container in your application. See the [Dependency Injection guide](./features/dependency-injection.md) for full details.
+
+### My benchmark class needs dependencies. How do I inject them?
+
+Add the optional `NBenchmark.DependencyInjection` package and pass an `IServiceProvider` to the host:
+
+```csharp
+using NBenchmark.DependencyInjection;
+
+var services = new ServiceCollection()
+    .AddSingleton<IOrderRepository, SqlOrderRepository>()
+    .AddTransient<OrderBenchmarks>()
+    .BuildServiceProvider();
+
+await BenchmarkHarness.Create(args)
+    .UseDependencyInjection<OrderBenchmarks>(services)
+    .RunAsync();
+
+public sealed class OrderBenchmarks(IOrderRepository repository)
+{
+    [Benchmark] public int CountOrders() => repository.Count();
+}
+```
+
+The container resolves all constructor parameters. A scoped variant (`UseScopedDependencyInjection`) is available for `DbContext`-style lifetimes - the scope is created per suite and disposed after teardown. See the [Dependency Injection guide](./features/dependency-injection.md) for the full API and lifetime semantics.
+
+### Can I use a DI container other than `Microsoft.Extensions.DependencyInjection`?
+
+Yes. The companion package only depends on `IServiceProvider` from the BCL. Any container that exposes one - Autofac, DryIoc, SimpleInjector, Lamar, etc. - works:
+
+```csharp
+var container = new ContainerBuilder()
+    .RegisterType<SqlOrderRepository>().As<IOrderRepository>()
+    .Build();
+
+await BenchmarkHarness.Create(args)
+    .UseDependencyInjection<OrderBenchmarks>(container.Resolve<IServiceProvider>())
+    .RunAsync();
+```
