@@ -102,7 +102,7 @@ The DI integration matches how `BenchmarkHarness` manages benchmark instances: *
 > Pass the factory, not the container. Every row above is isolated only because the worker can run
 > `BuildServices` itself. Handing over a built `IServiceProvider` is the single most common reason a
 > DI-backed run silently loses its isolation - and on bodies of provably identical cost, the
-> configuration difference between an isolated worker and this process was worth roughly 3.3x.
+> configuration difference between an isolated worker and this process is worth roughly 3.3x.
 
 The host **does not** auto-dispose the benchmark instance when a service provider is configured - the scope's disposal already handles that. This avoids double-disposal of `IDisposable` benchmarks that come from a scope.
 
@@ -153,16 +153,20 @@ The container resolves all constructor parameters from registered services. If a
 
 ## Using a non-Microsoft container
 
-The package is built around the `IServiceProvider` interface from the BCL, so any container that exposes one is supported. For Autofac, DryIoc, SimpleInjector, Lamar, etc., build your container, get its `IServiceProvider`, and pass it in:
+The package is built around the `IServiceProvider` interface from the BCL, so any container that exposes one is supported. For Autofac, DryIoc, SimpleInjector, Lamar, etc., build the container inside a static factory and pass that, so the worker can rebuild it:
 
 ```csharp
-var container = new ContainerBuilder()
-    .RegisterType<SqlOrderRepository>().As<IOrderRepository>()
-    .Build();
-
 await BenchmarkHarness.Create(args)
-    .UseDependencyInjection<OrderBenchmarks>(container.Resolve<IServiceProvider>())
+    .UseDependencyInjection<OrderBenchmarks>(BuildServices)
     .RunAsync();
+
+static IServiceProvider BuildServices()
+{
+    var container = new ContainerBuilder()
+        .RegisterType<SqlOrderRepository>().As<IOrderRepository>()
+        .Build();
+    return container.Resolve<IServiceProvider>();
+}
 ```
 
 ## Escape hatch: `WithInstanceFactory`
