@@ -1,7 +1,7 @@
 ---
 title: Samples
 description: Runnable sample projects included with NBenchmark.
-order: 9
+order: 10
 ---
 
 # Samples
@@ -16,7 +16,7 @@ Runs the same work two ways - closing over prepared data, and passing the prepar
 delegate - and prints where each was measured. Both are isolated: an `int[]` is sent to the worker by
 value. The third row is a capture that cannot be sent (a `Stream`), measured here on purpose with
 `Benchmark.RunInProcess`, because a refusal is an error rather than a silent downgrade. Also shows
-`WithState` on a suite.
+`BenchmarkSuite.Over` for a suite.
 
 ```bash
 cd samples/PreparedState
@@ -305,7 +305,7 @@ await new BenchmarkSuite("sleep")
 What to look at:
 
 - The "Launch Aggregation" table below the main results, showing cross-launch mean, stddev, median, and CI when `LaunchCount > 1`.
-- The primary result fields are the **average across launches**, and the reported interval comes from the spread between them — so a benchmark whose launches disagree shows a wide interval rather than one launch's tight one.
+- The primary result fields are the **average across launches**, and the reported interval comes from the spread between them - so a benchmark whose launches disagree shows a wide interval rather than one launch's tight one.
 - How `--launch-count 5` on the CLI overrides the programmatic count.
 - How the per-method `[Benchmark(LaunchCount = 3)]` attribute specifies different counts per benchmark.
 

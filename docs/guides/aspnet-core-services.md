@@ -49,7 +49,7 @@ public sealed class OrderBenchmarks(BenchDbContext db)
 
 - **`UseScopedDependencyInjection<T>(BuildServices)`** does three things in one call: discovers `T`'s assembly, configures instances to be resolved from a container built by your factory, and creates a fresh DI scope per `[Benchmark]` method. The scope is disposed in per-method teardown, so any `IDisposable` / `IAsyncDisposable` services (`DbContext`, `HttpClient`, etc.) are cleaned up. See [Dependency Injection](../features/dependency-injection.md).
 
-- **Pass the factory, not a built provider.** A container is live code - it holds singletons, open connections and closures - so it cannot cross a process boundary, and handing one over costs the run its isolation: the benchmarks are measured in this process under whatever JIT tiering it happens to have, and every result is stamped `host`. A static factory is a *recipe*, and a recipe is addressable: the worker runs `BuildServices` in its own process and resolves from the container it built there. The container is a different instance from any built here, and that is the point rather than a caveat - a benchmark resolved from a container this process already warmed up is partly measuring that warmth. The factory must be `static` and capture nothing, for the same reason a benchmark body must.
+- **Pass the factory, not a built provider.** There is no overload taking a built container - a container is live code, holding singletons, open connections and closures, so it cannot cross a process boundary, and handing one over is a **compile error**. A factory is a *recipe*, and a recipe is addressable: the worker runs `BuildServices` in its own process and resolves from the container it built there. The container is a different instance from any built here, and that is the point rather than a caveat - a benchmark resolved from a container this process already warmed up is partly measuring that warmth. The factory may close over an ordinary value such as a connection string, which travels with it; what it may not do is hand over the container itself.
 
 - **`AddDbContext` + `UseScopedDependencyInjection`** gives each benchmark method a fresh `DbContext`. With `PerMethod` lifetime (the default), method A cannot warm the entity cache that method B reads. See the [lifetime and disposal table](../features/dependency-injection.md#lifetime-and-disposal-semantics) for the full matrix.
 
@@ -91,7 +91,7 @@ The console reporter prints one comparison table per class, grouped by parameter
 - **Magnitude** - how large the difference is (Negligible / Small / Medium / Large). A ✓ with a Negligible magnitude is real but too small to act on.
 - **Alloc/op** - mean heap allocation per operation. EF Core query materialization is allocation-heavy; this column is often the most actionable signal.
 
-See [Reading Your Results](../output/reading-your-results.md) for every column, indicator, and warning.
+See [Reading Your Results](../getting-started/reading-your-results.md) for every column, indicator, and warning.
 
 ## When to go deeper
 
