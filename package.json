@@ -10,12 +10,12 @@
   },
   "devDependencies": {
     "cpy-cli": "7.0.0",
-    "markdown-it-mathjax3": "4.3.2",
+    "markdown-it-mathjax3": "5.2.0",
     "vitepress": "1.6.4",
     "vitepress-sidebar": "1.38.0",
     "vue": "3.5.41"
   },
   "dependencies": {
-    "vitepress-mermaid-renderer": "1.1.29"
+    "vitepress-mermaid-renderer": "1.2.0"
   }
 }
